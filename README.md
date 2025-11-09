@@ -8,3 +8,10 @@ fleet-repo/
 │       └── default.nix
 └── hosts/
     └── rpi-generic.nix   # Common configuration for all Pis
+
+
+cpu indedntity / uniqus string
+
+storage
+
+test mqtt / api
