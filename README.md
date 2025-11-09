@@ -1,4 +1,4 @@
-# nix-dataloggers
+# nix-datalogger
 
 fleet-repo/
 ├── flake.nix             # The entry point
