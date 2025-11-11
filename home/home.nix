@@ -6,15 +6,17 @@
   [
     # System Utilities
     htop      # Interactive process viewer
-    ripgrep   # Fast grep alternative
-    fd        # Simple find alternative
-    jq        # JSON processor (great for API debugging)
     curl      # Data transfer tool
     wget      # File retrieval
 
     # Development/Debugging
     git       # Version control
-    python3   # Python runtime
+
+    vim
+    util-linux
+    gptfdisk
+    fastfetch
+    sops
   ];
 
   # Let Home Manager manage itself

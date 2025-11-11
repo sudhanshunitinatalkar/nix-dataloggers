@@ -22,7 +22,7 @@
       homeConfigurations."datalogger" = home-manager.lib.homeManagerConfiguration 
       {
         inherit pkgs;
-        
+                
         # Pass inputs if your home.nix needs them
         extraSpecialArgs = { inherit inputs; };
 
@@ -33,7 +33,6 @@
             home = 
             {
               username = "datalogger";
-              homeDirectory = "/home/datalogger";
               stateVersion = "25.05"; # Update this to match your install time
             };
 
