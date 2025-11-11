@@ -103,13 +103,15 @@ if [ -z "$SUDO_USER" ]; then
     echo "!!! Could not find \$SUDO_USER. Skipping linger step. !!!"
     echo "Please run 'sudo loginctl enable-linger <username>' manually after reboot."
 # Check if the user is 'root' - we don't want to linger root.
-elif [ "$SUDO_USER" == "root" ]; then
+# FIX 1: Changed '==' to '=' for POSIX compatibility with sh/dash
+elif [ "$SUDO_USER" = "root" ]; then
     echo "!!! Script was run by root directly, not via sudo. Skipping linger step. !!!"
     echo "Please run 'sudo loginctl enable-linger <username>' manually after reboot."
 # Check if the user actually exists (pre-flight check)
 elif id -u "$SUDO_USER" >/dev/null 2>&1; then
     echo "--- Automatically enabling linger for user '$SUDO_USER'... ---"
-    logctl enable-linger "$SUDO_USER"
+    # FIX 2: Changed 'logctl' to 'loginctl'
+    loginctl enable-linger "$SUDO_USER"
     echo "--- User services (linger) enabled for '$SUDO_USER'. ---"
 else
     # This case should rarely happen if sudo is set up correctly
