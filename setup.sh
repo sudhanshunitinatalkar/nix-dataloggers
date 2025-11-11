@@ -10,13 +10,13 @@
 #                   or zero if no command exited with a non-zero status.
 set -euo pipefail
 
-# --- [Step 0/6] Root User Check ---
-if [ "$EUID" -ne 0 ]; then
+# --- [Step 0/7] Root User Check ---
+if [ "$(id -u)" -ne 0 ]; then
   echo "!!! This script must be run as root (with sudo). Exiting. !!!"
   exit 1
 fi
 
-echo "--- [Step 1/6] Starting Full System Update & Upgrade ---"
+echo "--- [Step 1/7] Starting Full System Update & Upgrade ---"
 # This updates the package lists and upgrades all installed packages.
 # This also updates the Raspberry Pi firmware to the latest stable version.
 apt update
@@ -24,14 +24,14 @@ apt upgrade -y
 echo "--- System update complete. ---"
 echo ""
 
-echo "--- [Step 2/6] Installing Nix Package Manager (Daemon) ---"
+echo "--- [Step 2/7] Installing Nix Package Manager (Daemon) ---"
 # This runs the official installer script for Nix in daemon (multi-user) mode.
 # We pipe the curl download directly into sh.
 curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install | sh -s -- --daemon
 echo "--- Nix installation complete. ---"
 echo ""
 
-echo "--- [Step 3/6] Configuring Nix for Flakes ---"
+echo "--- [Step 3/7] Configuring Nix for Flakes ---"
 # This enables experimental features like flakes, which are
 # essential for modern Nix-based dataloggers.
 NIX_CONF_FILE="/etc/nix/nix.conf"
@@ -52,7 +52,16 @@ fi
 echo ""
 
 
-echo "--- [Step 5/6] Enabling User Services on Boot (Linger) ---"
+echo "--- [Step 4/7] Enabling Automatic Security Updates ---"
+# This installs and configures 'unattended-upgrades' to automatically
+# apply security updates in the background.
+apt install unattended-upgrades -y
+dpkg-reconfigure -plow unattended-upgrades
+echo "--- Automatic updates enabled. ---"
+echo ""
+
+
+echo "--- [Step 5/7] Enabling User Services on Boot (Linger) ---"
 # This allows systemd user services (like those Nix may create)
 # to start at boot, even before a user logs in.
 # We will automatically use the user who invoked 'sudo' ($SUDO_USER).
@@ -77,7 +86,7 @@ else
 fi
 echo ""
 
-echo "--- [Step 6/6] Setup Complete. Rebooting... ---"
+echo "--- [Step 6/7] Setup Complete. Rebooting... ---"
 echo "The system will reboot in 10 seconds. Press Ctrl+C to cancel."
 sleep 10
 reboot
