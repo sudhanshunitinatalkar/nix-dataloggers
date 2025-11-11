@@ -19,6 +19,12 @@
     sops
 
     cloudflared
+
+
+    python3
+    python3Packages.pymodbus
+    
+
   ];
 
   # Let Home Manager manage itself
