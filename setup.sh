@@ -10,13 +10,13 @@
 #                   or zero if no command exited with a non-zero status.
 set -euo pipefail
 
-# --- [Step 0/7] Root User Check ---
+# --- [Step 0/8] Root User Check ---
 if [ "$(id -u)" -ne 0 ]; then
   echo "!!! This script must be run as root (with sudo). Exiting. !!!"
   exit 1
 fi
 
-echo "--- [Step 1/7] Starting Full System Update & Upgrade ---"
+echo "--- [Step 1/8] Starting Full System Update & Upgrade ---"
 # This updates the package lists and upgrades all installed packages.
 # This also updates the Raspberry Pi firmware to the latest stable version.
 apt update
@@ -67,7 +67,8 @@ echo "--- [Step 5/8] Enabling Automatic Security Updates ---"
 # This installs and configures 'unattended-upgrades' to automatically
 # apply security updates in the background.
 apt install unattended-upgrades -y
-dpkg-reconfigure -plow unattended-upgrades
+# Set DEBIAN_FRONTEND=noninteractive to prevent any TUI confirmation
+DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -plow unattended-upgrades
 echo "--- Automatic updates enabled. ---"
 echo ""
 
