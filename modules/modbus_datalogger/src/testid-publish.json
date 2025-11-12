@@ -1,9 +1,11 @@
 {
     "api_endpoints": {
         "Main Cloud API": {
-            "enabled": false,
+            "enabled": true,
             "url": "https://api.saicloud.in/api/device_data/site_NSA/SNHS2B09",
-            "api_key": "4xCOWlaAAGwa8uBEwIhMfcKnqSrxFPizE",
+            "api_key": "4xCOWlaAAGwa8uBEwIhMfcKnqSrxFPiz",
+            "auth_type": "x-api-key",
+            "payload_format": "direct",
             "timeout_seconds": 10
         }
     },

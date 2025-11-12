@@ -45,18 +45,36 @@ def api(db_path, config):
         # Parse the sensor data
         sensor_data = json.loads(data)
         
-        # Prepare the payload
-        payload = {
-            "timestamp": timestamp,
-            "data": sensor_data
-        }
+        # Prepare the payload based on payload_format in config
+        payload_format = config.get("payload_format", "wrapped")
+        
+        if payload_format == "direct":
+            # Send sensor data directly without wrapping
+            payload = sensor_data
+        else:
+            # Default: wrap with timestamp and data
+            payload = {
+                "timestamp": timestamp,
+                "data": sensor_data
+            }
+        
+        # Build headers
+        headers = {"Content-Type": "application/json"}
+        
+        # Add API key based on auth_type
+        auth_type = config.get("auth_type", "bearer")
+        api_key = config.get("api_key", "")
+        
+        if auth_type == "x-api-key":
+            headers["X-API-KEY"] = api_key
+        elif auth_type == "bearer":
+            headers["Authorization"] = f"Bearer {api_key}"
+        elif auth_type == "header":
+            # Custom header name
+            header_name = config.get("api_key_header", "X-API-KEY")
+            headers[header_name] = api_key
         
         # Make the API request
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {config['api_key']}"
-        }
-        
         response = requests.post(
             config["url"],
             json=payload,
@@ -269,6 +287,7 @@ def publish(modbus_config_path, publish_config_path):
             return results
         
         print(f"Found {unpublished_count} unpublished row(s).")
+        print(f"Publish interval: {publish_rate} seconds")
         
         # Publish to API if enabled
         if "api_endpoints" in publish_config:
