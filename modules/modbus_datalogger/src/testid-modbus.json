@@ -7,7 +7,7 @@
         "polling_interval_seconds": 5
     },
     "database": {
-        "db_path": "~/datalogger/test.db",
+        "db_path": "~test.db",
         "maintenance_rows_to_delete": 5000
     },
     "system_health": {
