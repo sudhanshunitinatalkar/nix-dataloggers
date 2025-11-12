@@ -7,9 +7,9 @@ import time
 
 # --- NEW CONFIG FILE PATHS ---
 # This file tells us WHERE the database is
-MAIN_CONFIG_FILE = "src/cpuid-modbus.json"
+MAIN_CONFIG_FILE = "src/testid-modbus.json"
 # This file tells us WHERE to send the data (API/MQTT)
-PUBLISH_CONFIG_FILE = "src/cpuid-publish.json"
+PUBLISH_CONFIG_FILE = "src/testid-publish.json"
 
 def load_config(config_path):
     """
