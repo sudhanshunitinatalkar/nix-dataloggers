@@ -1,316 +1,347 @@
-import sqlite3
+# publish.py
+
 import json
+import sqlite3
 import sys
-import requests  # Requires: pip install requests
-import paho.mqtt.client as mqtt  # Requires: pip install paho-mqtt
-import time
-import os  # <-- ADDED for path expansion
-from datetime import datetime # <-- ADDED for test block
-import database # <-- ADDED for test block (assumes database.py is in the same directory)
+import requests
+import paho.mqtt.client as mqtt
+from datetime import datetime
 
-# --- NEW CONFIG FILE PATHS ---
-# This file tells us WHERE the database is
-MAIN_CONFIG_FILE = "testid-modbus.json"
-# This file tells us WHERE to send the data (API/MQTT)
-PUBLISH_CONFIG_FILE = "testid-publish.json"
 
-def load_config(config_path):
+def api(db_path, config):
     """
-    Loads a single JSON configuration file.
-    """
-    print(f"Loading configuration from {config_path}...")
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        return config
-    except FileNotFoundError:
-        print(f"FATAL ERROR: Configuration file '{config_path}' not found.", file=sys.stderr)
-        return None
-    except json.JSONDecodeError:
-        print(f"FATAL ERROR: Could not decode JSON from '{config_path}'. Check format.", file=sys.stderr)
-        return None
-    except Exception as e:
-        print(f"FATAL ERROR: An unexpected error occurred loading '{config_path}': {e}", file=sys.stderr)
-        return None
-
-def fetch_unpublished_data(db_path, limit=50):
-    """
-    Fetches a batch of unpublished records from the database.
+    Publishes the oldest unpublished row to the API endpoint.
     
+    Args:
+        db_path (str): Path to the SQLite database file.
+        config (dict): The API configuration from testid-publish.json
+        
     Returns:
-        list: A list of tuples, where each tuple is (id, data_json_string).
+        bool: True if successfully published, False otherwise.
     """
-    records = []
+    if not config.get("enabled", False):
+        print("API publishing is disabled in config.")
+        return False
+    
     try:
-        # NOTE: db_path is now the expanded, absolute path
+        # Get the oldest unpublished row
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
-            # Select rows where is_published is 0
-            cursor.execute(
-                "SELECT id, data FROM readings WHERE is_published = 0 ORDER BY timestamp ASC LIMIT ?",
-                (limit,)
-            )
-            records = cursor.fetchall()
-    except sqlite3.Error as e:
-        print(f"Error fetching unpublished data: {e}", file=sys.stderr)
-        return []
-        
-    return records
-
-def mark_data_as_published(db_path, record_ids):
-    """
-    Updates a list of record IDs to set is_published = 1.
-    """
-    if not record_ids:
-        return True
-        
-    try:
-        # NOTE: db_path is now the expanded, absolute path
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            # Create a string of placeholders (?,?,?)
-            placeholders = ','.join(['?'] * len(record_ids))
-            query = f"UPDATE readings SET is_published = 1 WHERE id IN ({placeholders})"
+            cursor.execute("""
+                SELECT id, timestamp, data 
+                FROM readings 
+                WHERE is_published = 0 
+                ORDER BY timestamp ASC 
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
             
-            cursor.execute(query, record_ids)
-            conn.commit()
-            print(f"Successfully marked {len(record_ids)} records as published.")
+            if not row:
+                print("No unpublished rows found for API.")
+                return False
+            
+            row_id, timestamp, data = row
+            
+        # Parse the sensor data
+        sensor_data = json.loads(data)
+        
+        # Prepare the payload
+        payload = {
+            "timestamp": timestamp,
+            "data": sensor_data
+        }
+        
+        # Make the API request
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {config['api_key']}"
+        }
+        
+        response = requests.post(
+            config["url"],
+            json=payload,
+            headers=headers,
+            timeout=config.get("timeout_seconds", 10)
+        )
+        
+        if response.status_code in [200, 201, 204]:
+            # Mark as published
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE readings SET is_published = 1 WHERE id = ?",
+                    (row_id,)
+                )
+                conn.commit()
+            
+            print(f"Successfully published row {row_id} to API (Status: {response.status_code})")
             return True
-    except sqlite3.Error as e:
-        print(f"Error marking data as published: {e}", file=sys.stderr)
+        else:
+            print(f"API request failed with status {response.status_code}: {response.text}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print("API request timed out.")
         return False
-
-def publish_to_api(api_config, data_payloads):
-    """
-    Publishes a batch of data to a single HTTP API endpoint.
-    
-    Args:
-        api_config (dict): The configuration dictionary for one API.
-        data_payloads (list): List of (id, json_string) tuples.
-        
-    Returns:
-        bool: True on success, False on failure.
-    """
-    if not api_config.get('enabled', False):
-        print("API endpoint is disabled. Skipping.")
-        return True # Not a failure, just disabled
-
-    url = api_config.get('url')
-    api_key = api_config.get('api_key')
-    timeout = api_config.get('timeout_seconds', 10)
-    
-    if not url or not api_key:
-        print(f"Error: API config is missing 'url' or 'api_key'.", file=sys.stderr)
-        return False
-
-    headers = {
-        'Content-Type': 'application/json',
-        'X-API-Key': api_key  # Using X-API-Key, adjust if auth is Bearer token
-    }
-    
-    # Convert list of JSON strings into a list of Python dicts
-    # Then dump it back to a single JSON array string for batch upload
-    try:
-        json_objects = [json.loads(row[1]) for row in data_payloads]
-        batch_payload = json.dumps(json_objects)
-    except json.JSONDecodeError as e:
-        print(f"Error serializing batch payload for API: {e}", file=sys.stderr)
-        return False
-
-    try:
-        print(f"Sending batch of {len(data_payloads)} records to API: {url}...")
-        response = requests.post(url, data=batch_payload, headers=headers, timeout=timeout)
-        
-        # Check for HTTP success codes (2xx)
-        response.raise_for_status() 
-        
-        print(f"API Success (Status {response.status_code}).")
-        return True
-        
     except requests.exceptions.RequestException as e:
-        print(f"Error publishing to API ({url}): {e}", file=sys.stderr)
+        print(f"API request error: {e}")
+        return False
+    except sqlite3.Error as e:
+        print(f"Database error in API publish: {e}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Unexpected error in API publish: {e}", file=sys.stderr)
         return False
 
-def publish_to_mqtt(mqtt_config, data_payloads):
+
+def mqtt_publish(db_path, config):
     """
-    Publishes data to a single MQTT broker, one message per record.
+    Publishes the oldest unpublished row to the MQTT broker.
     
     Args:
-        mqtt_config (dict): The configuration dictionary for one broker.
-        data_payloads (list): List of (id, json_string) tuples.
+        db_path (str): Path to the SQLite database file.
+        config (dict): The MQTT configuration from testid-publish.json
         
     Returns:
-        bool: True on success, False on failure.
+        bool: True if successfully published, False otherwise.
     """
-    if not mqtt_config.get('enabled', False):
-        print("MQTT broker is disabled. Skipping.")
-        return True # Not a failure, just disabled
-
-    host = mqtt_config.get('host')
-    port = mqtt_config.get('port', 1883)
-    topic_prefix = mqtt_config.get('topic_prefix')
-    
-    if not host or not topic_prefix:
-        print(f"Error: MQTT config is missing 'host' or 'topic_prefix'.", file=sys.stderr)
+    if not config.get("enabled", False):
+        print("MQTT publishing is disabled in config.")
         return False
     
-    client = None
     try:
+        # Get the oldest unpublished row
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, timestamp, data 
+                FROM readings 
+                WHERE is_published = 0 
+                ORDER BY timestamp ASC 
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            
+            if not row:
+                print("No unpublished rows found for MQTT.")
+                return False
+            
+            row_id, timestamp, data = row
+        
+        # Parse the sensor data
+        sensor_data = json.loads(data)
+        
+        # Prepare the payload
+        payload = {
+            "timestamp": timestamp,
+            "data": sensor_data
+        }
+        
+        # Create MQTT client
         client = mqtt.Client()
-        if mqtt_config.get('username') and mqtt_config.get('password'):
-            client.username_pw_set(mqtt_config['username'], mqtt_config['password'])
         
-        print(f"Connecting to MQTT broker: {host}:{port}...")
-        client.connect(host, port, 60)
-        client.loop_start() # Start network loop
-
-        # Define the full topic
-        data_topic = f"{topic_prefix}/readings"
+        # Set username and password if provided
+        if config.get("username") and config.get("password"):
+            client.username_pw_set(config["username"], config["password"])
         
-        print(f"Publishing {len(data_payloads)} messages to topic: {data_topic}...")
+        # Configure TLS if enabled
+        if config.get("tls_enabled", False):
+            client.tls_set()  # Use default system CA certificates
+            print(f"TLS enabled for MQTT connection")
         
-        for record_id, json_string in data_payloads:
-            # Publish with QoS 1 (at least once)
-            msg_info = client.publish(data_topic, payload=json_string, qos=1)
-            
-            # Wait for the message to be confirmed (robust publishing)
-            msg_info.wait_for_publish(timeout=5) 
-            if not msg_info.is_published():
-                raise Exception(f"Message {record_id} failed to publish.")
-
-        print("MQTT publish complete.")
-        return True
-
-    except Exception as e:
-        print(f"Error publishing to MQTT ({host}): {e}", file=sys.stderr)
-        return False
-    finally:
-        if client:
-            client.loop_stop()
-            client.disconnect()
-            print("MQTT client disconnected.")
-
-
-def main():
-    """
-    Main publishing loop.
-    """
-    print(f"--- Publisher script started at {time.asctime()} ---")
-    
-    # 1. Load BOTH config files
-    main_config = load_config(MAIN_CONFIG_FILE)
-    if main_config is None:
-        sys.exit(1)
+        # Connection tracking
+        connected = False
+        published = False
+        error_message = None
         
-    publish_config = load_config(PUBLISH_CONFIG_FILE)
-    if publish_config is None:
-        sys.exit(1)
+        def on_connect(client, userdata, flags, rc):
+            nonlocal connected, error_message
+            if rc == 0:
+                connected = True
+                print("Connected to MQTT broker")
+            else:
+                error_message = f"Connection failed with code {rc}"
         
-    # 2. Get database path from the MAIN config
-    db_path = main_config.get("database", {}).get("db_path")
-    if not db_path:
-        print(f"FATAL ERROR: 'db_path' not found in '{MAIN_CONFIG_FILE}'", file=sys.stderr)
-        sys.exit(1)
+        def on_publish(client, userdata, mid):
+            nonlocal published
+            published = True
+            print(f"Message published with ID {mid}")
         
-    # --- [FIX] Expand '~' to /home/user
-    db_path = os.path.expanduser(db_path)
-
-    # 3. Fetch data from DB
-    unpublished_data = fetch_unpublished_data(db_path, limit=50)
-    
-    if not unpublished_data:
-        print("No unpublished data found. Exiting.")
-        return
+        client.on_connect = on_connect
+        client.on_publish = on_publish
         
-    print(f"Found {len(unpublished_data)} unpublished records to process.")
-    
-    all_endpoints_succeeded = True
-    record_ids = [row[0] for row in unpublished_data]
-    
-    # 4. Publish to all API endpoints (from PUBLISH config)
-    for api_name, api_cfg in publish_config.get('api_endpoints', {}).items():
-        print(f"\n--- Processing API: {api_name} ---")
-        success = publish_to_api(api_cfg, unpublished_data)
-        if not success:
-            all_endpoints_succeeded = False
-            print(f"Failed to publish to API: {api_name}.")
-            # Stop trying other endpoints for this batch if one fails
-            break 
-            
-    # 5. Publish to all MQTT brokers (from PUBLISH config)
-    #    Only run this if all API endpoints were successful
-    if all_endpoints_succeeded:
-        for broker_name, mqtt_cfg in publish_config.get('mqtt_brokers', {}).items():
-            print(f"\n--- Processing MQTT: {broker_name} ---")
-            success = publish_to_mqtt(mqtt_cfg, unpublished_data)
-            if not success:
-                all_endpoints_succeeded = False
-                print(f"Failed to publish to MQTT: {broker_name}.")
-                # Stop trying other brokers for this batch if one fails
+        # Extract host (remove http:// or https:// prefix if present)
+        host = config["host"]
+        if host.startswith("http://"):
+            host = host[7:]
+        elif host.startswith("https://"):
+            host = host[8:]
+        
+        # Connect to broker
+        port = config.get("port", 1883)
+        client.connect(host, port, keepalive=60)
+        
+        # Start network loop
+        client.loop_start()
+        
+        # Wait for connection (max 5 seconds)
+        import time
+        for _ in range(50):
+            if connected:
                 break
-                
-    # 6. Mark as published ONLY if all enabled endpoints were successful
-    if all_endpoints_succeeded:
-        print("\nAll endpoints succeeded. Marking records as published.")
-        mark_data_as_published(db_path, record_ids)
-    else:
-        print("\nOne or more endpoints failed. Records will NOT be marked as published and will be retried next time.")
+            time.sleep(0.1)
         
-    print(f"--- Publisher script finished at {time.asctime()} ---")
+        if not connected:
+            client.loop_stop()
+            print(f"Failed to connect to MQTT broker: {error_message or 'Timeout'}")
+            return False
+        
+        # Publish message
+        topic = f"{config.get('topic_prefix', 'dataloggers')}/{row_id}"
+        result = client.publish(topic, json.dumps(payload), qos=1)
+        
+        # Wait for publish confirmation (max 5 seconds)
+        for _ in range(50):
+            if published:
+                break
+            time.sleep(0.1)
+        
+        client.loop_stop()
+        client.disconnect()
+        
+        if published:
+            # Mark as published in database
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE readings SET is_published = 1 WHERE id = ?",
+                    (row_id,)
+                )
+                conn.commit()
+            
+            print(f"Successfully published row {row_id} to MQTT topic: {topic}")
+            return True
+        else:
+            print("MQTT publish confirmation not received")
+            return False
+            
+    except Exception as e:
+        print(f"Error in MQTT publish: {e}", file=sys.stderr)
+        return False
 
 
-# --- [NEW] TEST BLOCK ---
-if __name__ == "__main__":
+def publish(modbus_config_path, publish_config_path):
     """
-    This test block sets up a clean environment to test the publisher.
-    It uses the 'database.py' file to create and populate a test database
-    according to the config files, then runs the main() publisher logic
-    and verifies that the data was marked as published.
+    Main publish function that reads configs and publishes to enabled endpoints.
+    
+    Publishes the oldest unpublished row from the database to all enabled
+    endpoints (API and/or MQTT).
+    
+    Args:
+        modbus_config_path (str): Path to testid-modbus.json
+        publish_config_path (str): Path to testid-publish.json
+        
+    Returns:
+        dict: Status of each publishing method {"api": bool, "mqtt": bool}
     """
+    results = {"api": False, "mqtt": False}
     
-    print("--- [TEST BLOCK] ---")
-    
-    # 1. Load the main config to find the test.db path
-    temp_config = load_config(MAIN_CONFIG_FILE)
-    if temp_config is None:
-        print("[TEST BLOCK] Failed to load main config. Exiting test.", file=sys.stderr)
-        sys.exit(1)
-        
-    db_path = temp_config.get("database", {}).get("db_path")
-    if not db_path:
-        print(f"[TEST BLOCK] 'db_path' not found in '{MAIN_CONFIG_FILE}'", file=sys.stderr)
-        sys.exit(1)
-        
-    # 2. IMPORTANT: Expand the path (e.g., '~' -> '/home/user')
-    db_path = os.path.expanduser(db_path)
-    
-    print(f"[TEST BLOCK] Using database file: {db_path}")
-    
-    print("[TEST BLOCK] Initializing new database...")
-    # Use the functions from 'database.py'
-    database.initDB(db_path)
-        
-    print("\n[TEST BLOCK] --- Running main() publish logic... ---")
-    
-    # 5. Run the main function
-    main()
-    
-    print("[TEST BLOCK] --- Main() logic complete. ---")
-
-    # 6. Verify the results
-    print("[TEST BLOCK] Checking database to see if rows were marked as published...")
     try:
+        # Load modbus config to get database path and publish rate
+        with open(modbus_config_path, 'r') as f:
+            modbus_config = json.load(f)
+        
+        db_path = modbus_config["database"]["db_path"]
+        publish_rate = modbus_config.get("datalogger_settings", {}).get("publish_interval_seconds", 60)
+        
+        # Load publish config
+        with open(publish_config_path, 'r') as f:
+            publish_config = json.load(f)
+        
+        # Check if there are any unpublished rows
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM readings WHERE is_published = 0")
             unpublished_count = cursor.fetchone()[0]
             
-            if unpublished_count == 0:
-                print("[TEST BLOCK] \033[92mSUCCESS:\033[0m 0 unpublished rows found. Data was marked as published.")
-            else:
-                print(f"[TEST BLOCK] \033[91mFAILED:\033[0m {unpublished_count} unpublished rows remain. Publish must have failed.")
-                print("[TEST BLOCK] (This is expected if API/MQTT endpoints are disabled or failed to connect)")
-    except sqlite3.Error as e:
-        print(f"[TEST BLOCK] Error checking final db state: {e}", file=sys.stderr)
+        if unpublished_count == 0:
+            print("No unpublished rows in database.")
+            return results
+        
+        print(f"Found {unpublished_count} unpublished row(s).")
+        
+        # Publish to API if enabled
+        if "api_endpoints" in publish_config:
+            for endpoint_name, endpoint_config in publish_config["api_endpoints"].items():
+                print(f"\n--- Publishing to API: {endpoint_name} ---")
+                results["api"] = api(db_path, endpoint_config)
+        
+        # Publish to MQTT if enabled
+        if "mqtt_brokers" in publish_config:
+            for broker_name, broker_config in publish_config["mqtt_brokers"].items():
+                print(f"\n--- Publishing to MQTT: {broker_name} ---")
+                results["mqtt"] = mqtt_publish(db_path, broker_config)
+        
+        return results
+        
+    except FileNotFoundError as e:
+        print(f"Config file not found: {e}", file=sys.stderr)
+        return results
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON in config file: {e}", file=sys.stderr)
+        return results
+    except KeyError as e:
+        print(f"Missing required config key: {e}", file=sys.stderr)
+        return results
+    except Exception as e:
+        print(f"Unexpected error in publish: {e}", file=sys.stderr)
+        return results
 
-    print("--- [TEST BLOCK] Finished. ---")
+
+# --- Example Usage and Testing ---
+if __name__ == "__main__":
+    import database
+    import modbus
+    import time
+    
+    print("=== Testing publish.py ===\n")
+    
+    # Configuration
+    modbus_config = "testid-modbus.json"
+    publish_config = "testid-publish.json"
+    
+    # Load the database path from modbus config
+    with open(modbus_config, 'r') as f:
+        config = json.load(f)
+    db_path = config["database"]["db_path"]
+    
+    # Initialize database and add test data
+    print("1. Initializing test database...")
+    database.initDB(db_path)
+    
+    print("\n2. Adding 3 test readings...")
+    for i in range(3):
+        ts = datetime.now().isoformat()
+        sensor_data = modbus.readsens_all(modbus_config)
+        if sensor_data:
+            json_data = json.dumps(sensor_data)
+            database.insertReading(db_path, ts, json_data)
+            print(f"   Added reading {i+1}/3")
+        time.sleep(0.5)
+    
+    print("\n3. Current database contents:")
+    database.printAllReadings(db_path)
+    
+    # Test publishing
+    print("\n4. Testing publish function...")
+    results = publish(modbus_config, publish_config)
+    
+    print("\n5. Publishing results:")
+    print(f"   API: {'Success' if results['api'] else 'Failed/Disabled'}")
+    print(f"   MQTT: {'Success' if results['mqtt'] else 'Failed/Disabled'}")
+    
+    print("\n6. Database after publishing:")
+    database.printAllReadings(db_path)
+    
+    print("\n=== Test complete ===")
+    print("Note: Check if rows were marked as published (is_published = 1)")

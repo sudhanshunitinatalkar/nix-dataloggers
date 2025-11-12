@@ -91,4 +91,4 @@ def readsens_all(filename):
 
 if __name__ == "__main__":
     # Update the test to use the new config file name
-    print(readsens_all("testid.json"))
+    print(readsens_all("testid-modbus.json"))

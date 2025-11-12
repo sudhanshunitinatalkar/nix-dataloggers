@@ -4,7 +4,8 @@
         "location": "Main Factory Floor"
     },
     "datalogger_settings": {
-        "polling_interval_seconds": 5
+        "polling_interval_seconds": 5,
+        "publish_interval_seconds": 60
     },
     "database": {
         "db_path": "/home/datalogger/nix-datalogger/modules/modbus_datalogger/src/test.db",
@@ -47,5 +48,4 @@
             "scaling_factor": 1.0
         }
     }
-
 }

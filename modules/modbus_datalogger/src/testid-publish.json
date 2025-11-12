@@ -5,7 +5,6 @@
             "url": "https://api.saicloud.in/api/device_data/site_NSA/SNHS2B09",
             "api_key": "4xCOWlaAAGwa8uBEwIhMfcKnqSrxFPizE",
             "timeout_seconds": 10
-            
         }
     },
     "mqtt_brokers": {
@@ -15,7 +14,8 @@
             "username": "316A20002",
             "password": "316A20002",
             "topic_prefix": "dataloggers/test",
-            "enabled": true
+            "enabled": true,
+            "tls_enabled": false
         }
     }
 }
