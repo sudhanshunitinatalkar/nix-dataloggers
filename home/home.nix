@@ -21,11 +21,11 @@
     cloudflared
 
 
-    python3
-    python3Packages.pymodbus
-    python3Packages.requests
-    python3Packages.paho-mqtt
-    python3Packages.requests
+    python312
+    python312ckages.pymodbus
+    python312Packages.requests
+    python312Packages.paho-mqtt
+    python312Packages.requests
 
 
   ];
