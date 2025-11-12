@@ -7,7 +7,7 @@
         "polling_interval_seconds": 5
     },
     "database": {
-        "db_path": "/var/lib/datalogger/readings.db",
+        "db_path": "/home/sudhanshu/datalogger/test.db",
         "maintenance_rows_to_delete": 5000
     },
     "system_health": {
