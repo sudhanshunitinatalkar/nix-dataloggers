@@ -26,4 +26,4 @@ def get_cpuid():
 
 
 if __name__ == "__main__":
-    print = get_cpuid()
+    print(get_cpuid())
