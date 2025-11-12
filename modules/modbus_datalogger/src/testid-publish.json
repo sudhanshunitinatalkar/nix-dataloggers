@@ -2,7 +2,7 @@
     "api_endpoints": {
         "Main Cloud API": {
             "enabled": true,
-            "url": "https://api.saicloud.in/api/device_data/site_NSA/SNHS2B09'",
+            "url": "https://api.saicloud.in/api/device_data/site_NSA/SNHS2B09",
             "api_key": "4xCOWlaAAGwa8uBEwIhMfcKnqSrxFPizE",
             "timeout_seconds": 10
         }
