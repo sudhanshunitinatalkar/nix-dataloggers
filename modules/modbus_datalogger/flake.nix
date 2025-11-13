@@ -1,5 +1,5 @@
 {
-  description = "Modbus Datalogger";
+  description = "Datalogger";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
